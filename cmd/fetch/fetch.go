@@ -1,70 +1,24 @@
 package fetch
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	. "github.com/florinutz/git-intel/cmd/fetch/model"
+	"github.com/go-git/go-git/v5"
+	git_ssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	"github.com/google/go-github/v62/github"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/crypto/ssh/terminal"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 )
-
-type CloneOptions struct {
-	Branch  string     `mapstructure:"branch,omitempty"`
-	Depth   int        `mapstructure:"depth,omitempty"`
-	Recurse bool       `mapstructure:"recurse,omitempty"` // For recursive cloning
-	Auth    AuthConfig `mapstructure:"auth,omitempty"`
-}
-
-type RepoFilterConfig struct {
-	Forks            int      `mapstructure:"forks,omitempty"`             // Minimum forks count
-	Stars            int      `mapstructure:"stars,omitempty"`             // Minimum stars count
-	UpdatedAfter     string   `mapstructure:"updated_after,omitempty"`     // Only include repos updated after this date
-	UpdatedBefore    string   `mapstructure:"updated_before,omitempty"`    // Only include repos updated before this date
-	IncludeLanguages []string `mapstructure:"include_languages,omitempty"` // Only include repos with these languages
-	ExcludeLanguages []string `mapstructure:"exclude_languages,omitempty"` // Exclude repos with these languages
-}
-
-type RepoOrderConfig struct {
-	Field     string `mapstructure:"field"`     // Field to sort by. Valid values are "created", "updated", "pushed", "full_name", "size"
-	Direction string `mapstructure:"direction"` // Direction to sort. Either "asc" or "desc".
-}
-
-type GithubOrgConfig struct {
-	Name            string           `mapstructure:"name"`
-	ExcludeRepos    []string         `mapstructure:"exclude_repos,omitempty"`
-	OrgCloneOptions CloneOptions     `mapstructure:"org_clone_options,omitempty"` // Custom Clone options per Org level
-	Auth            AuthConfig       `mapstructure:"auth,omitempty"`
-	RepoFilter      RepoFilterConfig `mapstructure:"repo_filter,omitempty"` // Filter out repositories based on certain conditions
-	RepoOrder       RepoOrderConfig  `mapstructure:"repo_order,omitempty"`  // Order repositories based on a field
-	RepoLimit       int              `mapstructure:"repo_limit,omitempty"`  // Limit the number of repositories to be cloned
-}
-
-type RepoConfig struct {
-	Url              string        `mapstructure:"url"`
-	RepoCloneOptions *CloneOptions `mapstructure:"repo_clone_options,omitempty"` // Custom Clone options per repo level
-	Auth             AuthConfig    `mapstructure:"auth,omitempty"`
-}
-
-type Path struct {
-	Path         string            `mapstructure:"path"`
-	Repos        []RepoConfig      `mapstructure:"repos,omitempty"`
-	Orgs         []GithubOrgConfig `mapstructure:"orgs,omitempty"`
-	CloneOptions *CloneOptions     `mapstructure:"path_clone_options,omitempty"` // Custom Clone options per Path level
-	Auth         AuthConfig        `mapstructure:"auth,omitempty"`
-}
-
-type AuthConfig struct {
-	Username   string `mapstructure:"username,omitempty"`    // for Basic Auth
-	Password   string `mapstructure:"password,omitempty"`    // for Basic Auth
-	SSHKey     string `mapstructure:"ssh_key,omitempty"`     // for SSH
-	OAuthToken string `mapstructure:"oauth_token,omitempty"` // for OAuth
-}
-
-type Config struct {
-	Paths []Path       `mapstructure:"paths"`
-	Clone CloneOptions `mapstructure:"global_clone_options,omitempty"`
-	Auth  AuthConfig   `mapstructure:"auth,omitempty"`
-}
 
 // BuildFetchCmd clones repos
 func BuildFetchCmd() (cmd *cobra.Command) {
@@ -85,7 +39,8 @@ Example config file:
 paths:
 
 `,
-		Args: cobra.NoArgs,
+		// todo orgs will be in the config file along with everything else
+		Args: cobra.ExactArgs(1), // the org name, which should ve removed once it works
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			for _, pathConfig := range opts.Paths {
 				if len(pathConfig.Repos) == 0 && len(pathConfig.Orgs) == 0 {
@@ -113,7 +68,87 @@ paths:
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Fetching repositories...")
+			// todo orgName as an arg once it works (it will be in the config file)
+			orgName := args[0]
+
+			token := os.Getenv("GITHUB_TOKEN")
+			if token == "" {
+				return fmt.Errorf("GITHUB_TOKEN environment variable not set")
+			}
+
+			client := github.NewClient(nil).WithAuthToken(token)
+
+			ghListOpts := &github.RepositoryListByOrgOptions{
+				Type:      RepoTypePrivate.String(),
+				Sort:      RepoListSortUpdated.String(),
+				Direction: "desc",
+				ListOptions: github.ListOptions{
+					PerPage: 100,
+				},
+			}
+
+			ctx := context.Background()
+			var orgRepos []*github.Repository
+			for {
+				pageRepos, resp, err := client.Repositories.ListByOrg(ctx, orgName, ghListOpts)
+				if err != nil {
+					return fmt.Errorf("error occurred while fetching org repositories: %w", err)
+				}
+				orgRepos = append(orgRepos, pageRepos...)
+				if resp.NextPage == 0 {
+					break
+				}
+				ghListOpts.Page = resp.NextPage
+			}
+
+			// Iterate through and print all the names of the organization's repositories
+			fmt.Printf("%-70s %-30s\n", "Repo Name", "Last Updated")
+			for _, repo := range orgRepos {
+				fmt.Printf("%-70s %-30s\n", *repo.Name, repo.UpdatedAt.Format("2006-01-02"))
+			}
+
+			// clone the first 1 repo:
+			if len(orgRepos) > 0 {
+				repo := orgRepos[0]
+
+				conn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
+				if err != nil {
+					return fmt.Errorf("dialing the ssh agent failed: %w", err)
+				}
+				defer conn.Close()
+
+				sshAgent := agent.NewClient(conn)
+
+				auth := &git_ssh.PublicKeysCallback{
+					User: "git",
+					Callback: func() ([]ssh.Signer, error) {
+						signers, err := sshAgent.Signers()
+						if err != nil {
+							return nil, fmt.Errorf("error occurred while getting ssh agent signers: %w", err)
+						}
+
+						// todo this single key signer also works, but let's have it disabled till the configs work and we can use it as a configurable method alongside the agent
+
+						//keySigner, err := getSSHKeySigner(os.Getenv("HOME") + "/.ssh/id_ed25519")
+						//if err != nil {
+						//	return nil, fmt.Errorf("error occurred while getting ssh key signer: %w", err)
+						//}
+						//signers := []ssh.Signer{keySigner}
+
+						return signers, nil
+					},
+				}
+
+				clonePath := filepath.Join("repos", *repo.Name)
+				if _, err := git.PlainCloneContext(ctx, clonePath, false, &git.CloneOptions{
+					URL:   *repo.SSHURL,
+					Depth: 1,
+					Auth:  auth,
+				}); err != nil {
+					return fmt.Errorf("error occurred while cloning repo: %w", err)
+				}
+			}
+
 			return nil
 		},
 	}
@@ -121,6 +156,38 @@ paths:
 	viper.UnmarshalKey("paths", &opts)
 
 	return
+}
+
+// getSSHKeySigner reads an SSH key from the given path and returns a signer
+// todo use this when the configs work and we can use it as a configurable method alongside the agent
+func getSSHKeySigner(sshKeyPath string) (ssh.Signer, error) {
+	sshKey, err := os.ReadFile(sshKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("error occurred while reading ssh key at %s: %w", sshKeyPath, err)
+	}
+
+	signer, err := ssh.ParsePrivateKey(sshKey)
+	if err != nil {
+		var passphraseMissingError *ssh.PassphraseMissingError
+		needsPassphrase := errors.As(err, &passphraseMissingError)
+		if !needsPassphrase {
+			return nil, fmt.Errorf("parsing private key failed: %w", err)
+		}
+
+		fmt.Print("Enter passphrase for encrypted key: ")
+		passphraseBytes, err := terminal.ReadPassword(int(syscall.Stdin))
+		if err != nil {
+			return nil, fmt.Errorf("read passphrase error: %w", err)
+		}
+		passphrase := strings.TrimSpace(string(passphraseBytes))
+		fmt.Println()
+
+		signer, err = ssh.ParsePrivateKeyWithPassphrase(sshKey, []byte(passphrase))
+		if err != nil {
+			return nil, fmt.Errorf("parsing private key with passphrase failed: %w", err)
+		}
+	}
+	return signer, nil
 }
 
 func validateRepo(repoUrl string) error {

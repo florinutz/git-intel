@@ -14,10 +14,6 @@ func main() {
 	}
 }
 
-type AnalyzeConfig struct {
-	FeatureFlags map[string]bool
-}
-
 func buildRootCommand() *cobra.Command {
 	var opts struct {
 		cfgFile string
