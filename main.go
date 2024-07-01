@@ -39,6 +39,7 @@ func buildRootCommand() *cobra.Command {
 
 	cmd.AddCommand(
 		fetch.BuildFetchCmd(),
+		fetch.BuildConfigGenCmd(),
 	)
 
 	cmd.PersistentFlags().StringVarP(&opts.cfgFile, "config", "c", "", "config file")
