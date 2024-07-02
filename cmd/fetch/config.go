@@ -134,6 +134,43 @@ func BuildConfigGenCmd() *cobra.Command {
 	}
 }
 
+func ptr[T any](t T) *T {
+	return &t
+}
+
+func getCleanConfigMap(config Config) (map[string]interface{}, error) {
+	jsonConfig, err := json.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
+	var configMap map[string]interface{}
+	err = json.Unmarshal(jsonConfig, &configMap)
+	if err != nil {
+		return nil, err
+	}
+	cleanMap(configMap)
+	return configMap, nil
+}
+
+func getCleanConfigMap2(config Config) (map[string]interface{}, error) {
+	var configMap map[string]interface{}
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:  &configMap,
+		TagName: "mapstructure",
+	}
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return nil, err
+	}
+	err = decoder.Decode(config)
+	if err != nil {
+		return nil, err
+	}
+	cleanMap(configMap)
+
+	return configMap, nil
+}
+
 func cleanMap(m map[string]interface{}) {
 	for k, v := range m {
 		switch v := v.(type) {
