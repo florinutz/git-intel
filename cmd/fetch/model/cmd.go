@@ -1,10 +1,10 @@
 package model
 
 type CloneOptions struct {
-	Branch  string     `mapstructure:"branch,omitempty"`
-	Depth   int        `mapstructure:"depth,omitempty"`
-	Recurse bool       `mapstructure:"recurse,omitempty"` // For recursive cloning
-	Auth    AuthConfig `mapstructure:"auth,omitempty"`
+	Branch  string      `mapstructure:"branch,omitempty"`
+	Depth   int         `mapstructure:"depth,omitempty"`
+	Recurse bool        `mapstructure:"recurse,omitempty"` // For recursive cloning
+	Auth    *AuthConfig `mapstructure:"auth,omitempty"`
 }
 
 type RepoFilterConfig struct {
@@ -22,19 +22,19 @@ type RepoOrderConfig struct {
 }
 
 type GithubOrgConfig struct {
-	Name            string           `mapstructure:"name"`
-	ExcludeRepos    []string         `mapstructure:"exclude_repos,omitempty"`
-	OrgCloneOptions CloneOptions     `mapstructure:"org_clone_options,omitempty"` // Custom Clone options per Org level
-	Auth            AuthConfig       `mapstructure:"auth,omitempty"`
-	RepoFilter      RepoFilterConfig `mapstructure:"repo_filter,omitempty"` // Filter out repositories based on certain conditions
-	RepoOrder       RepoOrderConfig  `mapstructure:"repo_order,omitempty"`  // Order repositories based on a field
-	RepoLimit       int              `mapstructure:"repo_limit,omitempty"`  // Limit the number of repositories to be cloned
+	Name            string            `mapstructure:"name"`
+	ExcludeRepos    []string          `mapstructure:"exclude_repos,omitempty"`
+	OrgCloneOptions *CloneOptions     `mapstructure:"org_clone_options,omitempty"` // Custom Clone options per Org level
+	Auth            *AuthConfig       `mapstructure:"auth,omitempty"`
+	RepoFilter      *RepoFilterConfig `mapstructure:"repo_filter,omitempty"` // Filter out repositories based on certain conditions
+	RepoOrder       *RepoOrderConfig  `mapstructure:"repo_order,omitempty"`  // Order repositories based on a field
+	RepoLimit       int               `mapstructure:"repo_limit,omitempty"`  // Limit the number of repositories to be cloned
 }
 
 type RepoConfig struct {
 	Url              string        `mapstructure:"url"`
 	RepoCloneOptions *CloneOptions `mapstructure:"repo_clone_options,omitempty"` // Custom Clone options per repo level
-	Auth             AuthConfig    `mapstructure:"auth,omitempty"`
+	Auth             *AuthConfig   `mapstructure:"auth,omitempty"`
 }
 
 type Path struct {
@@ -42,7 +42,7 @@ type Path struct {
 	Repos        []RepoConfig      `mapstructure:"repos,omitempty"`
 	Orgs         []GithubOrgConfig `mapstructure:"orgs,omitempty"`
 	CloneOptions *CloneOptions     `mapstructure:"path_clone_options,omitempty"` // Custom Clone options per Path level
-	Auth         AuthConfig        `mapstructure:"auth,omitempty"`
+	Auth         *AuthConfig       `mapstructure:"auth,omitempty"`
 }
 
 type AuthConfig struct {
@@ -55,7 +55,7 @@ type AuthConfig struct {
 type Config struct {
 	// tmp: org name (to be removed)
 	OrgName string
-	Paths   []Path       `mapstructure:"paths"`
-	Clone   CloneOptions `mapstructure:"global_clone_options,omitempty"`
-	Auth    AuthConfig   `mapstructure:"auth,omitempty"`
+	Paths   []Path        `mapstructure:"paths"`
+	Clone   *CloneOptions `mapstructure:"global_clone_options,omitempty"`
+	Auth    *AuthConfig   `mapstructure:"auth,omitempty"`
 }
