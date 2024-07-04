@@ -107,46 +107,48 @@ paths:
 				fmt.Printf("%-70s %-30s\n", *repo.Name, repo.UpdatedAt.Format("2006-01-02"))
 			}
 
+			if len(orgRepos) == 0 {
+				return nil
+			}
+
 			// clone the first 1 repo:
-			if len(orgRepos) > 0 {
-				repo := orgRepos[0]
+			repo := orgRepos[0]
 
-				conn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
-				if err != nil {
-					return fmt.Errorf("dialing the ssh agent failed: %w", err)
-				}
-				defer conn.Close()
+			conn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
+			if err != nil {
+				return fmt.Errorf("dialing the ssh agent failed: %w", err)
+			}
+			defer conn.Close()
 
-				sshAgent := agent.NewClient(conn)
+			sshAgent := agent.NewClient(conn)
 
-				auth := &git_ssh.PublicKeysCallback{
-					User: "git",
-					Callback: func() ([]ssh.Signer, error) {
-						signers, err := sshAgent.Signers()
-						if err != nil {
-							return nil, fmt.Errorf("error occurred while getting ssh agent signers: %w", err)
-						}
+			auth := &git_ssh.PublicKeysCallback{
+				User: "git",
+				Callback: func() ([]ssh.Signer, error) {
+					signers, err := sshAgent.Signers()
+					if err != nil {
+						return nil, fmt.Errorf("error occurred while getting ssh agent signers: %w", err)
+					}
 
-						// todo this single key signer also works, but let's have it disabled till the configs work and we can use it as a configurable method alongside the agent
+					// todo this single key signer also works, but let's have it disabled till the configs work and we can use it as a configurable method alongside the agent
 
-						//keySigner, err := getSSHKeySigner(os.Getenv("HOME") + "/.ssh/id_ed25519")
-						//if err != nil {
-						//	return nil, fmt.Errorf("error occurred while getting ssh key signer: %w", err)
-						//}
-						//signers := []ssh.Signer{keySigner}
+					//keySigner, err := getSSHKeySigner(os.Getenv("HOME") + "/.ssh/id_ed25519")
+					//if err != nil {
+					//	return nil, fmt.Errorf("error occurred while getting ssh key signer: %w", err)
+					//}
+					//signers := []ssh.Signer{keySigner}
 
-						return signers, nil
-					},
-				}
+					return signers, nil
+				},
+			}
 
-				clonePath := filepath.Join("repos", *repo.Name)
-				if _, err := git.PlainCloneContext(ctx, clonePath, false, &git.CloneOptions{
-					URL:   *repo.SSHURL,
-					Depth: 1,
-					Auth:  auth,
-				}); err != nil {
-					return fmt.Errorf("error occurred while cloning repo: %w", err)
-				}
+			clonePath := filepath.Join("repos", *repo.Name)
+			if _, err := git.PlainCloneContext(ctx, clonePath, false, &git.CloneOptions{
+				URL:   *repo.SSHURL,
+				Depth: 1,
+				Auth:  auth,
+			}); err != nil {
+				return fmt.Errorf("error occurred while cloning repo: %w", err)
 			}
 
 			return nil
